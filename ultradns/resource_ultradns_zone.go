@@ -3,6 +3,7 @@ package ultradns
 import (
 	"errors"
 	"fmt"
+	"regexp"
 
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 	log "github.com/sirupsen/logrus"
@@ -67,7 +68,14 @@ func newZoneResource(d *schema.ResourceData) (zoneCreateDTO, error) {
 	if attr, ok := d.GetOk("type"); ok {
 		switch attr.(string) {
 		case "PRIMARY":
-			z.PrimaryCreateInfo.CreateType = "NEW"
+			if attr, ok := d.GetOk("create_type"); ok {
+				z.PrimaryCreateInfo.CreateType = attr.(string)
+				if attr.(string) == "COPY" {
+					if attr, ok := d.GetOk("original_zone_name"); ok {
+						z.PrimaryCreateInfo.OriginalZoneName = attr.(string)
+					}
+				}
+			}
 		case "SECONDARY":
 			// z.SecondaryCreateInfo.PrimaryNameServers.NameServerList["nameServerIP1"] = map[interface{}]interface{}{"ip": "8.8.8.8"}
 			ipList1 := make(map[string]interface{})
@@ -87,6 +95,7 @@ func newZoneResource(d *schema.ResourceData) (zoneCreateDTO, error) {
 
 	if attr, ok := d.GetOk("name"); ok {
 		z.Properties.Name = attr.(string)
+		d.SetId(attr.(string))
 	}
 
 	if attr, ok := d.GetOk("account"); ok {
@@ -112,6 +121,15 @@ func validateNewZone(zoneType interface{}, other string) ([]string, []error) {
 	return nil, nil
 }
 
+func validateFqdn(zoneName interface{}, other string) ([]string, []error) {
+	z := zoneName.(string)
+	pattern := regexp.MustCompile(`\.$`)
+	if !pattern.MatchString(z) {
+		return nil, []error{errors.New("name must be an FQDN ending in a period")}
+	}
+	return nil, nil
+}
+
 func resourceUltradnsZone() *schema.Resource {
 	return &schema.Resource{
 		Create: resourceUltraDNSZoneCreate,
@@ -121,8 +139,9 @@ func resourceUltradnsZone() *schema.Resource {
 
 		Schema: map[string]*schema.Schema{
 			"name": {
-				Type:     schema.TypeString,
-				Required: true,
+				Type:         schema.TypeString,
+				Required:     true,
+				ValidateFunc: validateFqdn,
 			},
 			"type": {
 				Type:         schema.TypeString,
@@ -134,6 +153,15 @@ func resourceUltradnsZone() *schema.Resource {
 				Type:     schema.TypeString,
 				Required: true,
 				ForceNew: true,
+			},
+			"create_type": {
+				Type:     schema.TypeString,
+				Optional: true,
+				Default:  "NEW",
+			},
+			"original_zone_name": {
+				Type:     schema.TypeString,
+				Optional: true,
 			},
 			"alias_target": {
 				Type:     schema.TypeString,
